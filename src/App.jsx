@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import './App.css';
 
 const MAX_PHOTOS = 10;
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -121,24 +121,18 @@ function copyTextSynchronously(text) {
 export default function App() {
   const [photos, setPhotos] = useState([]);
   const [context, setContext] = useState('');
-  const [instagramHandle, setInstagramHandle] = useState('');
   const [uploadErrors, setUploadErrors] = useState([]);
   const [generationError, setGenerationError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [captions, setCaptions] = useState([]);
-  const [testModeNotice, setTestModeNotice] = useState('');
 
-  // Carousel state: currentSlide is which slide the user is viewing (0..3)
-  // pickedIndex is which caption the user explicitly chose (null until they pick one)
   const [currentSlide, setCurrentSlide] = useState(0);
   const [pickedIndex, setPickedIndex] = useState(null);
   const [copiedIndex, setCopiedIndex] = useState(null);
-  const [exportedPost, setExportedPost] = useState(null);
 
   const fileInputRef = useRef(null);
-  const inFlightRef = useRef(null);
+  const inFlightRef = useRef(false);
   const resultsRef = useRef(null);
-  const exportPreviewRef = useRef(null);
   const touchStartXRef = useRef(null);
 
   const hasGeneratedCaptions = captions.length > 0;
@@ -146,8 +140,6 @@ export default function App() {
   const pickedCaption =
     hasGeneratedCaptions && pickedIndex !== null ? captions[pickedIndex] : null;
   const canExportSocial = Boolean(pickedCaption && !isGenerating);
-
-  const cleanHandle = instagramHandle.trim().replace(/^@+/, '');
 
   const handleChoosePhotosClick = () => {
     if (isGenerating) return;
@@ -157,43 +149,31 @@ export default function App() {
   const handleFilesSelected = async (event) => {
     const selectedFiles = Array.from(event.target.files || []);
     event.target.value = '';
-
     if (selectedFiles.length === 0) return;
 
     const newErrors = [];
     const remainingSlots = MAX_PHOTOS - photos.length;
 
     if (remainingSlots <= 0) {
-      setUploadErrors([
-        `You already have ${MAX_PHOTOS} photos selected. Remove a photo first if you would like to choose a different one.`,
-      ]);
+      setUploadErrors(['Maximum 10 photos allowed.']);
       return;
     }
 
     const filesToProcess = selectedFiles.slice(0, remainingSlots);
     if (selectedFiles.length > remainingSlots) {
-      newErrors.push(
-        `You can use up to ${MAX_PHOTOS} photos at a time. Only the first ${
-          remainingSlots === 1 ? 'photo was' : `${remainingSlots} photos were`
-        } checked.`
-      );
+      newErrors.push('Maximum 10 photos allowed.');
     }
 
     const validLoadedPhotos = [];
 
     for (const file of filesToProcess) {
       if (!ALLOWED_MIME_TYPES.has(file.type)) {
-        newErrors.push(
-          `"${file.name}" is not a supported photo file. Please choose a JPG, PNG, WebP, or GIF photo.`
-        );
+        newErrors.push(`"${file.name}" is not a JPG, PNG, WebP, or GIF photo.`);
         continue;
       }
 
       if (file.size > MAX_FILE_SIZE_BYTES) {
-        const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
-        newErrors.push(
-          `"${file.name}" is too large (${sizeMb} MB). Please choose a photo under 10 MB.`
-        );
+        newErrors.push(`"${file.name}" is over 10 MB.`);
         continue;
       }
 
@@ -211,9 +191,7 @@ export default function App() {
           apiDataUrl: compressed.dataUrl,
         });
       } catch {
-        newErrors.push(
-          `"${file.name}" could not be opened. Please try choosing that photo again.`
-        );
+        newErrors.push(`Could not open "${file.name}".`);
       }
     }
 
@@ -232,9 +210,8 @@ export default function App() {
 
   const handleGenerateCaptions = async () => {
     if (inFlightRef.current || isGenerating) return;
-
     if (photos.length === 0) {
-      setGenerationError('Please choose at least one photo before creating captions.');
+      setGenerationError('Please choose at least one photo.');
       return;
     }
 
@@ -244,14 +221,11 @@ export default function App() {
     setCopiedIndex(null);
     setPickedIndex(null);
     setCurrentSlide(0);
-    setExportedPost(null);
 
     try {
       const response = await fetch('/api/captions', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           photos: photos.map((photo) => ({
             name: photo.name,
@@ -263,30 +237,19 @@ export default function App() {
       });
 
       const data = await response.json().catch(() => null);
+      const nextCaptions =
+        response.ok && Array.isArray(data?.captions) && data.captions.length > 0
+          ? data.captions
+          : buildClientFallbackCaptions(context, photos.length);
 
-      if (!response.ok || !Array.isArray(data?.captions) || data.captions.length === 0) {
-        const fallback = buildClientFallbackCaptions(context, photos.length);
-        setCaptions(fallback);
-        setTestModeNotice('');
-        setCurrentSlide(0);
-        setPickedIndex(null);
-        setTimeout(() => {
-          resultsRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
-        }, 50);
-        return;
-      }
-
-      setCaptions(data.captions);
-      setTestModeNotice(typeof data.notice === 'string' ? data.notice : '');
+      setCaptions(nextCaptions);
       setCurrentSlide(0);
       setPickedIndex(null);
       setTimeout(() => {
         resultsRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
       }, 50);
     } catch {
-      const fallback = buildClientFallbackCaptions(context, photos.length);
-      setCaptions(fallback);
-      setTestModeNotice('');
+      setCaptions(buildClientFallbackCaptions(context, photos.length));
       setCurrentSlide(0);
       setPickedIndex(null);
       setTimeout(() => {
@@ -317,11 +280,8 @@ export default function App() {
     const endX = e.changedTouches?.[0]?.clientX ?? null;
     if (endX !== null) {
       const diff = touchStartXRef.current - endX;
-      if (diff > 45) {
-        handleNextSlide();
-      } else if (diff < -45) {
-        handlePrevSlide();
-      }
+      if (diff > 45) handleNextSlide();
+      else if (diff < -45) handlePrevSlide();
     }
     touchStartXRef.current = null;
   };
@@ -329,55 +289,32 @@ export default function App() {
   const handlePickCaption = (index) => {
     if (!hasGeneratedCaptions) return;
     setPickedIndex(index);
-    setExportedPost(null);
   };
 
   const handleCopyCaption = (index) => {
     const target = captions[index];
     if (!target?.text) return;
-    const ok = copyTextSynchronously(target.text);
-    if (ok) {
+    if (copyTextSynchronously(target.text)) {
       setPickedIndex(index);
       setCopiedIndex(index);
-    } else {
-      setGenerationError(
-        'We could not copy the caption automatically. You can press and hold the caption text to copy it.'
-      );
     }
   };
 
   const handleExportToSocial = async (platform) => {
     if (!pickedCaption) return;
-
     const captionToShare = pickedCaption.text;
-    // Copy synchronously BEFORE any window.open or async call so clipboard never fails
     copyTextSynchronously(captionToShare);
     setCopiedIndex(pickedIndex);
 
-    const handleLabel = cleanHandle ? `@${cleanHandle}` : 'your account';
-
-    setExportedPost({
-      platform,
-      handle: cleanHandle ? `@${cleanHandle}` : '',
-      style: pickedCaption.style,
-      captionText: captionToShare,
-      photos,
-    });
-
-    setTimeout(() => {
-      exportPreviewRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
-    }, 50);
-
-    // For LinkedIn, open the post composer directly with the caption pre-filled in the text parameter!
     if (platform === 'LinkedIn') {
-      const linkedInUrl = `https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(
-        captionToShare
-      )}`;
-      window.open(linkedInUrl, '_blank', 'noopener,noreferrer');
+      window.open(
+        `https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(captionToShare)}`,
+        '_blank',
+        'noopener,noreferrer'
+      );
       return;
     }
 
-    // If on a mobile device that supports native Web Share API, trigger the native share sheet
     const rawFiles = photos.map((p) => p.file).filter(Boolean);
     const canNativeShareFiles =
       typeof navigator !== 'undefined' &&
@@ -391,36 +328,18 @@ export default function App() {
         await navigator.share({
           files: rawFiles,
           text: captionToShare,
-          title: `Post to ${platform} (${handleLabel})`,
         });
         return;
       } catch (err) {
-        if (err?.name === 'AbortError') {
-          return;
-        }
+        if (err?.name === 'AbortError') return;
       }
     }
-  };
 
-  const handleOpenExternalPlatform = (platform) => {
-    if (!pickedCaption) return;
-    copyTextSynchronously(pickedCaption.text);
-    setCopiedIndex(pickedIndex);
-
-    if (platform === 'LinkedIn') {
-      const linkedInUrl = `https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(
-        pickedCaption.text
-      )}`;
-      window.open(linkedInUrl, '_blank', 'noopener,noreferrer');
-    } else if (platform === 'Instagram') {
-      const url = cleanHandle
-        ? `https://www.instagram.com/${encodeURIComponent(cleanHandle)}/`
-        : 'https://www.instagram.com/';
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } else {
-      const fbUrl = `https://www.facebook.com/`;
-      window.open(fbUrl, '_blank', 'noopener,noreferrer');
-    }
+    const url =
+      platform === 'Instagram'
+        ? 'https://www.instagram.com/'
+        : 'https://www.facebook.com/';
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -428,20 +347,17 @@ export default function App() {
       <div className="mobile-container">
         <header className="page-header">
           <h1 className="page-title">Create a caption for your photos.</h1>
-          <p className="page-subtitle">
-            Choose your photos. Pick a caption. Copy and share.
-          </p>
+          <div className="page-steps-bar" aria-label="How it works">
+            <span className="step-pill">1. Choose your photos</span>
+            <span className="step-pill">2. Pick a caption</span>
+            <span className="step-pill">3. Copy and share</span>
+          </div>
         </header>
 
         <main>
-          {/* Step 1: Photo Upload */}
-          <section className="step-section" aria-labelledby="step-photos-heading">
-            <h2 id="step-photos-heading" className="step-heading">
-              1. Choose your photos
-            </h2>
-            <p className="step-help">
-              You can add up to 10 photos (JPG, PNG, WebP, or GIF, up to 10 MB each).
-            </p>
+          {/* 1. Photos */}
+          <section className="step-section">
+            <h2 className="step-heading">1. Photos ({photos.length}/10)</h2>
 
             <input
               ref={fileInputRef}
@@ -460,28 +376,15 @@ export default function App() {
               onClick={handleChoosePhotosClick}
               disabled={isGenerating || photos.length >= MAX_PHOTOS}
             >
-              {photos.length === 0
-                ? 'Choose photos from your device'
-                : photos.length >= MAX_PHOTOS
-                ? 'Maximum of 10 photos selected'
-                : 'Add more photos'}
+              {photos.length === 0 ? 'Choose photos' : 'Add photos'}
             </button>
-
-            <div className="photo-count-bar" aria-live="polite">
-              {photos.length === 0
-                ? 'No photos chosen yet.'
-                : `${photos.length} of ${MAX_PHOTOS} ${
-                    photos.length === 1 ? 'photo' : 'photos'
-                  } chosen.`}
-            </div>
 
             {uploadErrors.length > 0 && (
               <div
                 className="notice-box notice-error"
                 role="alert"
-                style={{ marginTop: '16px', marginBottom: 0 }}
+                style={{ marginTop: '12px', marginBottom: 0 }}
               >
-                <p className="notice-title">Some files could not be added:</p>
                 <ul className="notice-list">
                   {uploadErrors.map((errText, idx) => (
                     <li key={idx}>{errText}</li>
@@ -497,57 +400,43 @@ export default function App() {
                     <div className="photo-preview-frame">
                       <img
                         src={photo.dataUrl}
-                        alt={`Selected photo ${index + 1}: ${photo.name}`}
+                        alt={photo.name}
                         className="photo-preview-img"
                       />
                     </div>
-                    <div className="photo-meta-row">
-                      <span className="photo-name">
-                        Photo {index + 1}: {photo.name}
-                      </span>
-                      <button
-                        type="button"
-                        className="remove-btn"
-                        onClick={() => handleRemovePhoto(photo.id)}
-                        disabled={isGenerating}
-                        aria-label={`Remove photo ${index + 1}: ${photo.name}`}
-                      >
-                        Remove
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      className="remove-btn"
+                      onClick={() => handleRemovePhoto(photo.id)}
+                      disabled={isGenerating}
+                      aria-label={`Remove photo ${index + 1}`}
+                    >
+                      Remove
+                    </button>
                   </li>
                 ))}
               </ul>
             )}
           </section>
 
-          {/* Step 2: Optional Context */}
+          {/* 2. Context */}
           <section className="step-section">
             <label htmlFor="photo-context-field" className="field-label">
               2. Tell us about these photos.
             </label>
-            <p className="step-help">
-              Optional. You can share who is in the photos, where they were taken, or what the occasion was.
-            </p>
             <textarea
               id="photo-context-field"
               className="context-textarea"
               value={context}
               onChange={(e) => setContext(e.target.value)}
-              placeholder="For example: Sunday lunch in the garden with my sister."
+              placeholder="Optional notes..."
               disabled={isGenerating}
-              rows={4}
+              rows={3}
             />
           </section>
 
-          {/* Step 3: Create Captions */}
-          <section className="step-section" aria-labelledby="step-create-heading">
-            <h2 id="step-create-heading" className="step-heading">
-              3. Create your captions
-            </h2>
-            <p className="step-help">
-              Press the button below to get four different captions you can slide through and choose from.
-            </p>
+          {/* 3. Create Captions */}
+          <section className="step-section">
             <button
               type="button"
               className="action-btn action-btn-primary"
@@ -558,44 +447,19 @@ export default function App() {
             </button>
           </section>
 
-          {isGenerating && (
-            <div className="loading-box" role="status" aria-live="polite">
-              Looking at your {photos.length === 1 ? 'photo' : 'photos'} and writing four captions. Please wait a moment...
-            </div>
-          )}
-
           {generationError && (
             <div className="notice-box notice-error" role="alert">
-              <p className="notice-title">Could not create captions</p>
               <p>{generationError}</p>
             </div>
           )}
 
-          {testModeNotice && (
-            <div className="notice-box" role="status" style={{ backgroundColor: '#f7f5f0' }}>
-              <p style={{ fontWeight: 700 }}>{testModeNotice}</p>
-            </div>
-          )}
-
-          {/* Step 4: Unified Carousel Slider + Pick 1 of 4 + Copy/Export to Facebook & Instagram */}
-          <section
-            ref={resultsRef}
-            className="step-section"
-            aria-labelledby="results-heading"
-          >
-            <h2 id="results-heading" className="step-heading">
-              4. Slide, pick your caption, and share
-            </h2>
-            <p className="step-help">
-              {hasGeneratedCaptions
-                ? 'Slide through the 4 captions below. Pick the one you want to enable copying and exporting to Facebook or Instagram.'
-                : 'Your 4 caption options will appear in this slider once you press "Create captions" above.'}
-            </p>
+          {/* 4. Carousel & Share */}
+          <section ref={resultsRef} className="step-section">
+            <h2 className="step-heading">3. Pick &amp; Share</h2>
 
             {hasGeneratedCaptions && activeCaption && (
               <div className="carousel-box">
-                {/* Step pills (1 to 4) */}
-                <div className="carousel-tabs" role="tablist" aria-label="Caption options">
+                <div className="carousel-tabs" role="tablist">
                   {captions.map((item, idx) => {
                     const isCurrent = idx === currentSlide;
                     const isPicked = idx === pickedIndex;
@@ -617,17 +481,16 @@ export default function App() {
                   })}
                 </div>
 
-                {/* Prev / Next Slider Controls */}
                 <div className="carousel-nav-row">
                   <button
                     type="button"
                     className="carousel-arrow-btn"
                     onClick={handlePrevSlide}
                   >
-                    &larr; Previous
+                    &larr; Prev
                   </button>
-                  <span className="carousel-counter" aria-live="polite">
-                    Option {currentSlide + 1} of {captions.length}
+                  <span className="carousel-counter">
+                    {currentSlide + 1} / {captions.length}
                   </span>
                   <button
                     type="button"
@@ -638,19 +501,17 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Active Caption Slide (Supports touch swipe) */}
                 <article
-                  className={`caption-card carousel-slide-card ${
+                  className={`caption-card ${
                     pickedIndex === currentSlide ? 'caption-card-picked' : ''
                   }`}
                   onTouchStart={handleTouchStart}
                   onTouchEnd={handleTouchEnd}
-                  aria-label={`Option ${currentSlide + 1}: ${activeCaption.style}`}
                 >
                   <div className="caption-style-header">
                     <h3 className="caption-style-label">{activeCaption.style}</h3>
                     {pickedIndex === currentSlide && (
-                      <span className="picked-badge">Selected</span>
+                      <span className="picked-badge">Picked</span>
                     )}
                   </div>
 
@@ -666,9 +527,7 @@ export default function App() {
                       }`}
                       onClick={() => handlePickCaption(currentSlide)}
                     >
-                      {pickedIndex === currentSlide
-                        ? '✓ Caption picked (Ready to share below)'
-                        : 'Pick this caption'}
+                      {pickedIndex === currentSlide ? '✓ Picked' : 'Pick this caption'}
                     </button>
 
                     <button
@@ -681,11 +540,7 @@ export default function App() {
                   </div>
 
                   {copiedIndex === currentSlide && (
-                    <div
-                      className="copy-confirm-banner"
-                      role="status"
-                      aria-live="polite"
-                    >
+                    <div className="copy-confirm-banner" role="status">
                       Caption copied.
                     </div>
                   )}
@@ -694,142 +549,40 @@ export default function App() {
                 <button
                   type="button"
                   className="action-btn action-btn-secondary"
-                  style={{ marginTop: '14px' }}
+                  style={{ marginTop: '12px' }}
                   onClick={handleGenerateCaptions}
                   disabled={isGenerating || photos.length === 0}
                 >
-                  {isGenerating ? 'Creating captions...' : 'Create more captions'}
+                  Create more captions
                 </button>
               </div>
             )}
 
-            {/* Export to Facebook & Instagram (In the same card, enabled once user picks 1 of the 4 captions) */}
-            <div className="export-divider-box">
-              <div className="handle-field-box">
-                <label htmlFor="instagram-handle-input" className="handle-label">
-                  Your Instagram or Facebook handle (optional):
-                </label>
-                <input
-                  id="instagram-handle-input"
-                  type="text"
-                  className="handle-input"
-                  value={instagramHandle}
-                  onChange={(e) => setInstagramHandle(e.target.value)}
-                  placeholder="For example: @grandma_rose"
-                />
-              </div>
-
-              <p className="export-status-label" aria-live="polite">
-                {pickedCaption
-                  ? `Picked Option ${pickedIndex + 1} (${pickedCaption.style}). Press a button below to prepare your post with photos and caption:`
-                  : hasGeneratedCaptions
-                  ? 'Press "Pick this caption" on your favourite slide above to enable Facebook and Instagram export.'
-                  : 'Create and pick one of the four captions to enable Facebook and Instagram export.'}
-              </p>
-
-              <div className="social-export-group">
-                <button
-                  type="button"
-                  className="action-btn action-btn-primary"
-                  onClick={() => handleExportToSocial('LinkedIn')}
-                  disabled={!canExportSocial}
-                >
-                  Export to LinkedIn (Auto-fills caption)
-                </button>
-                <button
-                  type="button"
-                  className="action-btn action-btn-primary"
-                  onClick={() => handleExportToSocial('Facebook')}
-                  disabled={!canExportSocial}
-                >
-                  Copy &amp; Export to Facebook
-                </button>
-                <button
-                  type="button"
-                  className="action-btn action-btn-primary"
-                  onClick={() => handleExportToSocial('Instagram')}
-                  disabled={!canExportSocial}
-                >
-                  Copy &amp; Export to Instagram
-                </button>
-              </div>
-
-              {/* Ready-to-Post Export Card with Photos + Handle + Caption */}
-              {exportedPost && pickedCaption && (
-                <div
-                  ref={exportPreviewRef}
-                  className="exported-post-card"
-                  role="region"
-                  aria-label={`Exported ${exportedPost.platform} post`}
-                >
-                  <div className="exported-post-banner">
-                    ✓ Ready for {exportedPost.platform} — Caption copied to your clipboard!
-                  </div>
-
-                  <div className="exported-post-header">
-                    <span className="exported-post-platform">
-                      {exportedPost.platform} Post Preview
-                    </span>
-                    <span className="exported-post-handle">
-                      {cleanHandle ? `@${cleanHandle}` : 'Your Account'}
-                    </span>
-                  </div>
-
-                  {photos.length > 0 && (
-                    <div className="exported-photos-grid">
-                      {photos.map((photo, idx) => (
-                        <div key={photo.id} className="exported-photo-box">
-                          <img
-                            src={photo.dataUrl}
-                            alt={`Export photo ${idx + 1}`}
-                            className="exported-photo-img"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="exported-caption-box">
-                    <p className="exported-caption-label">
-                      Caption for {cleanHandle ? `@${cleanHandle}` : exportedPost.platform} (Already Copied):
-                    </p>
-                    <p className="exported-caption-body">{pickedCaption.text}</p>
-                  </div>
-
-                  <p className="exported-instructions">
-                    {exportedPost.platform === 'LinkedIn' ? (
-                      <>
-                        <strong>How to finish posting on LinkedIn:</strong> We opened LinkedIn with your caption <strong>already typed into the post box</strong> (and copied a backup to your clipboard). Just add your {photos.length === 1 ? 'photo' : 'photos'} in LinkedIn and press <strong>Post</strong>!
-                      </>
-                    ) : (
-                      <>
-                        <strong>How to finish posting:</strong> For privacy, {exportedPost.platform} does not allow outside websites to type automatically into your account. We have copied your caption above — open {exportedPost.platform}, choose your {photos.length === 1 ? 'photo' : 'photos'}, and press <strong>Paste</strong> in the caption box.
-                      </>
-                    )}
-                  </p>
-
-                  <div className="social-export-group">
-                    <button
-                      type="button"
-                      className="action-btn action-btn-secondary"
-                      onClick={() => copyTextSynchronously(pickedCaption.text)}
-                    >
-                      Copy caption again
-                    </button>
-                    <button
-                      type="button"
-                      className="action-btn action-btn-primary"
-                      onClick={() => handleOpenExternalPlatform(exportedPost.platform)}
-                    >
-                      Open {exportedPost.platform}{' '}
-                      {cleanHandle && exportedPost.platform === 'Instagram'
-                        ? `(@${cleanHandle})`
-                        : ''}{' '}
-                      to Paste &amp; Post
-                    </button>
-                  </div>
-                </div>
-              )}
+            <div className="social-export-group">
+              <button
+                type="button"
+                className="action-btn action-btn-primary"
+                onClick={() => handleExportToSocial('LinkedIn')}
+                disabled={!canExportSocial}
+              >
+                Share to LinkedIn
+              </button>
+              <button
+                type="button"
+                className="action-btn action-btn-primary"
+                onClick={() => handleExportToSocial('Facebook')}
+                disabled={!canExportSocial}
+              >
+                Share to Facebook
+              </button>
+              <button
+                type="button"
+                className="action-btn action-btn-primary"
+                onClick={() => handleExportToSocial('Instagram')}
+                disabled={!canExportSocial}
+              >
+                Share to Instagram
+              </button>
             </div>
           </section>
         </main>
