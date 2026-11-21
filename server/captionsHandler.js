@@ -263,9 +263,12 @@ async function generateWithGemini({ apiKey, model, photos, context }) {
   return parseCaptionsJson(text);
 }
 
-async function generateWithOpenAI({ apiKey, model, photos, context }) {
-  const targetModel = model || 'gpt-4o-mini';
-  const content = [
+async function generateWithOpenAI({ apiKey, baseUrl, model, photos, context }) {
+  const targetModel = model || 'ilmu-glm-5.3';
+  const cleanBaseUrl = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const endpoint = `${cleanBaseUrl}/chat/completions`;
+
+  const multimodalContent = [
     {
       type: 'text',
       text: buildUserPrompt(context, photos.length),
@@ -278,7 +281,8 @@ async function generateWithOpenAI({ apiKey, model, photos, context }) {
     })),
   ];
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  // Try multimodal request first
+  const multiResponse = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -287,26 +291,58 @@ async function generateWithOpenAI({ apiKey, model, photos, context }) {
     body: JSON.stringify({
       model: targetModel,
       temperature: 0.7,
-      response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: buildSystemInstruction() },
-        { role: 'user', content },
+        { role: 'user', content: multimodalContent },
       ],
     }),
   });
 
-  const data = await response.json().catch(() => null);
-  if (!response.ok) {
-    const apiMessage = data?.error?.message || `HTTP ${response.status}`;
-    throw new Error(`Caption service error (OpenAI): ${apiMessage}`);
+  const multiData = await multiResponse.json().catch(() => null);
+  if (multiResponse.ok && multiData?.choices?.[0]?.message?.content) {
+    return parseCaptionsJson(multiData.choices[0].message.content);
   }
 
-  const text = data?.choices?.[0]?.message?.content;
+  // Fallback for text-only chat completion models (e.g. ilmu-glm-5.3 if image_url is not supported)
+  const photoNames = photos.map((p, idx) => `Photo ${idx + 1}: "${p.name}"`).join(', ');
+  const textPrompt = `${buildUserPrompt(context, photos.length)}\n\nUploaded photo files (${photos.length}): ${photoNames}`;
+
+  const textResponse = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: targetModel,
+      temperature: 0.7,
+      messages: [
+        { role: 'system', content: buildSystemInstruction() },
+        { role: 'user', content: textPrompt },
+      ],
+    }),
+  });
+
+  const textData = await textResponse.json().catch(() => null);
+  if (!textResponse.ok) {
+    const apiMessage =
+      textData?.error?.message ||
+      multiData?.error?.message ||
+      `HTTP ${textResponse.status}`;
+    throw new Error(`Caption service error: ${apiMessage}`);
+  }
+
+  const text = textData?.choices?.[0]?.message?.content;
   return parseCaptionsJson(text);
 }
 
-async function generateWithAnthropic({ apiKey, model, photos, context }) {
-  const targetModel = model || 'claude-3-5-sonnet-latest';
+async function generateWithAnthropic({ apiKey, baseUrl, model, photos, context }) {
+  const targetModel = model || 'ilmu-glm-5.3';
+  const cleanBaseUrl = (baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '');
+  const endpoint = cleanBaseUrl.endsWith('/v1')
+    ? `${cleanBaseUrl}/messages`
+    : `${cleanBaseUrl}/v1/messages`;
+
   const content = [
     ...photos.map((photo) => ({
       type: 'image',
@@ -322,11 +358,12 @@ async function generateWithAnthropic({ apiKey, model, photos, context }) {
     },
   ];
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
+      Authorization: `Bearer ${apiKey}`,
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
@@ -352,6 +389,16 @@ async function generateWithAnthropic({ apiKey, model, photos, context }) {
 }
 
 function readJsonBody(req, maxBytes = 85 * 1024 * 1024) {
+  if (req.body && typeof req.body === 'object') {
+    return Promise.resolve(req.body);
+  }
+  if (typeof req.body === 'string' && req.body.trim()) {
+    try {
+      return Promise.resolve(JSON.parse(req.body));
+    } catch {
+      return Promise.reject(new Error('The request could not be read. Please try again.'));
+    }
+  }
   return new Promise((resolve, reject) => {
     const chunks = [];
     let totalBytes = 0;
@@ -486,15 +533,31 @@ export async function handleCaptionsRequest(req, res) {
         context,
       });
     } else if (openaiKey) {
-      captions = await generateWithOpenAI({
-        apiKey: openaiKey,
-        model: getEnv('OPENAI_MODEL', fileEnv),
-        photos: validatedPhotos,
-        context,
-      });
+      try {
+        captions = await generateWithOpenAI({
+          apiKey: openaiKey,
+          baseUrl: getEnv('OPENAI_BASE_URL', fileEnv),
+          model: getEnv('OPENAI_MODEL', fileEnv),
+          photos: validatedPhotos,
+          context,
+        });
+      } catch (openAiErr) {
+        if (anthropicKey) {
+          captions = await generateWithAnthropic({
+            apiKey: anthropicKey,
+            baseUrl: getEnv('ANTHROPIC_BASE_URL', fileEnv),
+            model: getEnv('ANTHROPIC_MODEL', fileEnv),
+            photos: validatedPhotos,
+            context,
+          });
+        } else {
+          throw openAiErr;
+        }
+      }
     } else {
       captions = await generateWithAnthropic({
         apiKey: anthropicKey,
+        baseUrl: getEnv('ANTHROPIC_BASE_URL', fileEnv),
         model: getEnv('ANTHROPIC_MODEL', fileEnv),
         photos: validatedPhotos,
         context,

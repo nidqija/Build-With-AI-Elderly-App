@@ -55,15 +55,24 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [captions, setCaptions] = useState([]);
   const [testModeNotice, setTestModeNotice] = useState('');
+
+  // Carousel state: currentIndex is which slide the user is viewing (0..3)
+  // pickedIndex is which caption the user explicitly chose (null until they pick one)
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [pickedIndex, setPickedIndex] = useState(null);
   const [copiedIndex, setCopiedIndex] = useState(null);
-  const [selectedCaptionIndex, setSelectedCaptionIndex] = useState(0);
   const [exportNotice, setExportNotice] = useState('');
 
   const fileInputRef = useRef(null);
   const inFlightRef = useRef(false);
   const resultsRef = useRef(null);
+  const touchStartXRef = useRef(null);
 
   const hasGeneratedCaptions = captions.length > 0;
+  const activeCaption = hasGeneratedCaptions ? captions[currentSlide] : null;
+  const pickedCaption =
+    hasGeneratedCaptions && pickedIndex !== null ? captions[pickedIndex] : null;
+  const canExportSocial = Boolean(pickedCaption && !isGenerating);
 
   const handleChoosePhotosClick = () => {
     if (isGenerating) return;
@@ -155,6 +164,8 @@ export default function App() {
     setIsGenerating(true);
     setGenerationError('');
     setCopiedIndex(null);
+    setPickedIndex(null);
+    setCurrentSlide(0);
     setExportNotice('');
 
     try {
@@ -188,7 +199,8 @@ export default function App() {
 
       setCaptions(data.captions);
       setTestModeNotice(typeof data.notice === 'string' ? data.notice : '');
-      setSelectedCaptionIndex(0);
+      setCurrentSlide(0);
+      setPickedIndex(null);
       setTimeout(() => {
         resultsRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
       }, 50);
@@ -203,12 +215,48 @@ export default function App() {
     }
   };
 
-  const handleCopyCaption = async (text, index) => {
-    if (!text) return;
-    const ok = await copyTextToClipboard(text);
+  const handlePrevSlide = () => {
+    if (!hasGeneratedCaptions) return;
+    setCurrentSlide((prev) => (prev === 0 ? captions.length - 1 : prev - 1));
+  };
+
+  const handleNextSlide = () => {
+    if (!hasGeneratedCaptions) return;
+    setCurrentSlide((prev) => (prev === captions.length - 1 ? 0 : prev + 1));
+  };
+
+  const handleTouchStart = (e) => {
+    touchStartXRef.current = e.touches?.[0]?.clientX ?? null;
+  };
+
+  const handleTouchEnd = (e) => {
+    if (touchStartXRef.current === null) return;
+    const endX = e.changedTouches?.[0]?.clientX ?? null;
+    if (endX !== null) {
+      const diff = touchStartXRef.current - endX;
+      if (diff > 45) {
+        handleNextSlide();
+      } else if (diff < -45) {
+        handlePrevSlide();
+      }
+    }
+    touchStartXRef.current = null;
+  };
+
+  const handlePickCaption = async (index) => {
+    if (!hasGeneratedCaptions) return;
+    setPickedIndex(index);
+    setExportNotice('');
+  };
+
+  const handleCopyCaption = async (index) => {
+    const target = captions[index];
+    if (!target?.text) return;
+    const ok = await copyTextToClipboard(target.text);
     if (ok) {
+      setPickedIndex(index);
       setCopiedIndex(index);
-      setSelectedCaptionIndex(index);
+      setExportNotice('');
     } else {
       setGenerationError(
         'We could not copy the caption automatically. You can press and hold the caption text to copy it.'
@@ -217,17 +265,11 @@ export default function App() {
   };
 
   const handleExportToSocial = async (platform) => {
-    if (!hasGeneratedCaptions) return;
+    if (!pickedCaption) return;
 
-    const activeIndex =
-      copiedIndex !== null ? copiedIndex : selectedCaptionIndex;
-    const captionToShare =
-      captions[activeIndex]?.text || captions[0]?.text || '';
-
-    if (captionToShare) {
-      await copyTextToClipboard(captionToShare);
-      setCopiedIndex(activeIndex);
-    }
+    const captionToShare = pickedCaption.text;
+    await copyTextToClipboard(captionToShare);
+    setCopiedIndex(pickedIndex);
 
     const rawFiles = photos.map((p) => p.file).filter(Boolean);
     const canNativeShareFiles =
@@ -397,7 +439,7 @@ export default function App() {
               3. Create your captions
             </h2>
             <p className="step-help">
-              Press the button below to get four different captions you can choose from.
+              Press the button below to get four different captions you can slide through and choose from.
             </p>
             <button
               type="button"
@@ -428,115 +470,172 @@ export default function App() {
             </div>
           )}
 
-          {/* Step 4: Generated Captions (shown once captions are created) */}
-          {hasGeneratedCaptions && (
-            <section
-              ref={resultsRef}
-              className="results-section"
-              aria-labelledby="results-heading"
-            >
-              <h2 id="results-heading" className="results-heading">
-                Your four caption options
-              </h2>
-              <p className="results-intro">
-                Read the four options below and press &ldquo;Copy this caption&rdquo; under the one you prefer.
-              </p>
+          {/* Step 4: Unified Carousel Slider + Pick 1 of 4 + Copy/Export to Facebook & Instagram */}
+          <section
+            ref={resultsRef}
+            className="step-section"
+            aria-labelledby="results-heading"
+          >
+            <h2 id="results-heading" className="step-heading">
+              4. Slide, pick your caption, and share
+            </h2>
+            <p className="step-help">
+              {hasGeneratedCaptions
+                ? 'Slide through the 4 captions below. Pick the one you want to enable copying and exporting to Facebook or Instagram.'
+                : 'Your 4 caption options will appear in this slider once you press "Create captions" above.'}
+            </p>
 
-              <div className="captions-stack">
-                {captions.map((caption, index) => {
-                  const isCopied = copiedIndex === index;
-                  return (
-                    <article
-                      key={`${caption.style}-${index}`}
-                      className="caption-card"
-                      aria-label={`Caption option ${index + 1}: ${caption.style}`}
-                    >
-                      <h3 className="caption-style-label">
-                        {caption.style}
-                      </h3>
-                      <p className="caption-text">{caption.text}</p>
+            {hasGeneratedCaptions && activeCaption && (
+              <div className="carousel-box">
+                {/* Step pills (1 to 4) */}
+                <div className="carousel-tabs" role="tablist" aria-label="Caption options">
+                  {captions.map((item, idx) => {
+                    const isCurrent = idx === currentSlide;
+                    const isPicked = idx === pickedIndex;
+                    return (
                       <button
+                        key={item.style}
                         type="button"
-                        className="action-btn action-btn-primary"
-                        onClick={() => handleCopyCaption(caption.text, index)}
+                        role="tab"
+                        aria-selected={isCurrent}
+                        className={`carousel-tab-btn ${isCurrent ? 'active' : ''} ${
+                          isPicked ? 'picked' : ''
+                        }`}
+                        onClick={() => setCurrentSlide(idx)}
                       >
-                        Copy this caption
+                        {idx + 1}
+                        {isPicked ? ' ✓' : ''}
                       </button>
+                    );
+                  })}
+                </div>
 
-                      {isCopied && (
-                        <div
-                          className="copy-confirm-banner"
-                          role="status"
-                          aria-live="polite"
-                        >
-                          Caption copied.
-                        </div>
-                      )}
-                    </article>
-                  );
-                })}
-              </div>
+                {/* Prev / Next Slider Controls */}
+                <div className="carousel-nav-row">
+                  <button
+                    type="button"
+                    className="carousel-arrow-btn"
+                    onClick={handlePrevSlide}
+                  >
+                    &larr; Previous
+                  </button>
+                  <span className="carousel-counter" aria-live="polite">
+                    Option {currentSlide + 1} of {captions.length}
+                  </span>
+                  <button
+                    type="button"
+                    className="carousel-arrow-btn"
+                    onClick={handleNextSlide}
+                  >
+                    Next &rarr;
+                  </button>
+                </div>
 
-              <div className="more-captions-box">
-                <p className="more-captions-note">
-                  Would you like four different ideas for these same photos and notes?
-                </p>
+                {/* Active Caption Slide (Supports touch swipe) */}
+                <article
+                  className={`caption-card carousel-slide-card ${
+                    pickedIndex === currentSlide ? 'caption-card-picked' : ''
+                  }`}
+                  onTouchStart={handleTouchStart}
+                  onTouchEnd={handleTouchEnd}
+                  aria-label={`Option ${currentSlide + 1}: ${activeCaption.style}`}
+                >
+                  <div className="caption-style-header">
+                    <h3 className="caption-style-label">{activeCaption.style}</h3>
+                    {pickedIndex === currentSlide && (
+                      <span className="picked-badge">Selected</span>
+                    )}
+                  </div>
+
+                  <p className="caption-text">{activeCaption.text}</p>
+
+                  <div className="slide-action-stack">
+                    <button
+                      type="button"
+                      className={`action-btn ${
+                        pickedIndex === currentSlide
+                          ? 'action-btn-picked'
+                          : 'action-btn-primary'
+                      }`}
+                      onClick={() => handlePickCaption(currentSlide)}
+                    >
+                      {pickedIndex === currentSlide
+                        ? '✓ Caption picked (Ready to share below)'
+                        : 'Pick this caption'}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="action-btn action-btn-secondary"
+                      onClick={() => handleCopyCaption(currentSlide)}
+                    >
+                      Copy this caption
+                    </button>
+                  </div>
+
+                  {copiedIndex === currentSlide && (
+                    <div
+                      className="copy-confirm-banner"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      Caption copied.
+                    </div>
+                  )}
+                </article>
+
                 <button
                   type="button"
                   className="action-btn action-btn-secondary"
+                  style={{ marginTop: '14px' }}
                   onClick={handleGenerateCaptions}
                   disabled={isGenerating || photos.length === 0}
                 >
                   {isGenerating ? 'Creating captions...' : 'Create more captions'}
                 </button>
               </div>
-            </section>
-          )}
-
-          {/* Unified Export to Facebook & Instagram Section (Always visible, enabled once captions are generated) */}
-          <section
-            className="step-section"
-            style={{ marginTop: '24px' }}
-            aria-labelledby="quick-export-heading"
-          >
-            <h2 id="quick-export-heading" className="step-heading">
-              4. Export photos and caption to Facebook or Instagram
-            </h2>
-            <p className="step-help">
-              {hasGeneratedCaptions
-                ? 'Press a button below to copy your chosen caption and share your photos to Facebook or Instagram.'
-                : 'Create your captions in Step 3 to enable exporting your photos and caption to Facebook or Instagram.'}
-            </p>
-
-            <div className="social-export-group" style={{ marginTop: 0 }}>
-              <button
-                type="button"
-                className="action-btn action-btn-primary"
-                onClick={() => handleExportToSocial('Facebook')}
-                disabled={!hasGeneratedCaptions || isGenerating}
-              >
-                Export photos and caption to Facebook
-              </button>
-              <button
-                type="button"
-                className="action-btn action-btn-primary"
-                onClick={() => handleExportToSocial('Instagram')}
-                disabled={!hasGeneratedCaptions || isGenerating}
-              >
-                Export photos and caption to Instagram
-              </button>
-            </div>
-
-            {exportNotice && (
-              <div
-                className="copy-confirm-banner"
-                role="status"
-                aria-live="polite"
-              >
-                <p>Caption copied.</p>
-                <p className="export-notice-detail">{exportNotice}</p>
-              </div>
             )}
+
+            {/* Export to Facebook & Instagram (In the same card, enabled once user picks 1 of the 4 captions) */}
+            <div className="export-divider-box">
+              <p className="export-status-label" aria-live="polite">
+                {pickedCaption
+                  ? `Picked Option ${pickedIndex + 1} (${pickedCaption.style}). You can now copy and export to Facebook or Instagram:`
+                  : hasGeneratedCaptions
+                  ? 'Press "Pick this caption" on your favourite slide above to enable Facebook and Instagram export.'
+                  : 'Create and pick one of the four captions to enable Facebook and Instagram export.'}
+              </p>
+
+              <div className="social-export-group">
+                <button
+                  type="button"
+                  className="action-btn action-btn-primary"
+                  onClick={() => handleExportToSocial('Facebook')}
+                  disabled={!canExportSocial}
+                >
+                  Copy &amp; Export to Facebook
+                </button>
+                <button
+                  type="button"
+                  className="action-btn action-btn-primary"
+                  onClick={() => handleExportToSocial('Instagram')}
+                  disabled={!canExportSocial}
+                >
+                  Copy &amp; Export to Instagram
+                </button>
+              </div>
+
+              {exportNotice && (
+                <div
+                  className="copy-confirm-banner"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <p>Caption copied.</p>
+                  <p className="export-notice-detail">{exportNotice}</p>
+                </div>
+              )}
+            </div>
           </section>
         </main>
       </div>

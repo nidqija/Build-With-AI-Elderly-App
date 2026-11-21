@@ -295,10 +295,88 @@
   margin-bottom: 28px;
 }
 
+.carousel-box {
+  margin-top: 8px;
+  margin-bottom: 20px;
+}
+
+.carousel-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.carousel-tab-btn {
+  min-height: 48px;
+  border: 2px solid #111111;
+  background-color: #f7f5f0;
+  color: #111111;
+  font-size: 1.1rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.carousel-tab-btn.active {
+  background-color: #1b365d;
+  color: #ffffff;
+}
+
+.carousel-tab-btn.picked:not(.active) {
+  background-color: #e8f0f8;
+  border-color: #1b365d;
+}
+
+.carousel-nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.carousel-arrow-btn {
+  min-height: 48px;
+  padding: 10px 16px;
+  border: 2px solid #111111;
+  background-color: #f7f5f0;
+  color: #111111;
+  font-size: 1.05rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.carousel-arrow-btn:hover {
+  background-color: #eae6dc;
+}
+
+.carousel-counter {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #111111;
+  text-align: center;
+}
+
 .caption-card {
   border: 2px solid #111111;
   background-color: #ffffff;
   padding: 20px;
+}
+
+.caption-card-picked {
+  border: 3px solid #1b365d;
+  background-color: #fbfdff;
+}
+
+.caption-style-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 2px solid #111111;
+  padding-bottom: 8px;
+  margin-bottom: 14px;
 }
 
 .caption-style-label {
@@ -308,9 +386,41 @@
   color: #1b365d;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  border-bottom: 2px solid #111111;
-  padding-bottom: 8px;
-  margin-bottom: 14px;
+}
+
+.picked-badge {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 0.9rem;
+  font-weight: 800;
+  background-color: #1b365d;
+  color: #ffffff;
+  padding: 2px 8px;
+}
+
+.slide-action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.action-btn-picked {
+  background-color: #e8f0f8;
+  color: #111111;
+  border: 3px solid #1b365d;
+}
+
+.export-divider-box {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 3px solid #111111;
+}
+
+.export-status-label {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #111111;
+  margin-bottom: 12px;
 }
 
 .caption-text {
