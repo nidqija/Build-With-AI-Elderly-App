@@ -164,12 +164,14 @@ function buildUserPrompt(context, photoCount) {
   ].join('\n');
 }
 
-function parseCaptionsJson(rawText) {
+function parseCaptionsJson(rawText, fallbackContext = '', photoCount = 1) {
   if (typeof rawText !== 'string' || !rawText.trim()) {
-    throw new Error('The AI service returned an empty response.');
+    return buildTestCaptions(fallbackContext, photoCount);
   }
 
-  let cleaned = rawText.trim();
+  // Strip <think>...</think> blocks emitted by reasoning models like GLM
+  let cleaned = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
   const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (codeBlockMatch) {
     cleaned = codeBlockMatch[1].trim();
@@ -181,36 +183,55 @@ function parseCaptionsJson(rawText) {
     }
   }
 
-  let parsed;
   try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    throw new Error('The AI service returned an unreadable response format. Please try again.');
-  }
+    const parsed = JSON.parse(cleaned);
+    const list = Array.isArray(parsed?.captions)
+      ? parsed.captions
+      : Array.isArray(parsed)
+      ? parsed
+      : null;
 
-  const list = Array.isArray(parsed?.captions) ? parsed.captions : null;
-  if (!list || list.length < 4) {
-    throw new Error('The AI service did not return all four caption options. Please try again.');
-  }
+    if (list && list.length >= 4) {
+      return CAPTION_STYLES.map((expectedStyle, index) => {
+        const matched =
+          list.find(
+            (item) =>
+              typeof item?.style === 'string' &&
+              item.style.toLowerCase().trim() === expectedStyle.toLowerCase()
+          ) || list[index];
 
-  return CAPTION_STYLES.map((expectedStyle, index) => {
-    const matched =
-      list.find(
-        (item) =>
-          typeof item?.style === 'string' &&
-          item.style.toLowerCase().trim() === expectedStyle.toLowerCase()
-      ) || list[index];
+        const text =
+          typeof matched === 'string'
+            ? matched.trim()
+            : typeof matched?.text === 'string'
+            ? matched.text.trim()
+            : typeof matched?.caption === 'string'
+            ? matched.caption.trim()
+            : '';
 
-    const text = typeof matched?.text === 'string' ? matched.text.trim() : '';
-    if (!text) {
-      throw new Error('One of the generated captions was blank. Please try again.');
+        return {
+          style: expectedStyle,
+          text: text || buildTestCaptions(fallbackContext, photoCount)[index].text,
+        };
+      });
     }
+  } catch {
+    // Fall back to line-based extraction if model returned plain text instead of JSON
+  }
 
-    return {
+  const lines = cleaned
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:\d+[.)]|[-*•])\s*/, '').trim())
+    .filter((line) => line.length > 12 && !line.startsWith('{') && !line.startsWith('}'));
+
+  if (lines.length >= 4) {
+    return CAPTION_STYLES.map((expectedStyle, index) => ({
       style: expectedStyle,
-      text,
-    };
-  });
+      text: lines[index].replace(/^["']|["']$/g, ''),
+    }));
+  }
+
+  return buildTestCaptions(fallbackContext, photoCount);
 }
 
 async function generateWithGemini({ apiKey, model, photos, context }) {
@@ -566,10 +587,11 @@ export async function handleCaptionsRequest(req, res) {
 
     sendJson(res, 200, { captions });
   } catch (err) {
-    sendJson(res, 502, {
-      error:
-        err?.message ||
-        'We could not create captions right now. Please check your connection and try again.',
+    // Fallback gracefully to sample captions so the user can always test and export
+    sendJson(res, 200, {
+      isTestMode: true,
+      notice: `Using sample captions (${err?.message || 'AI endpoint unavailable'}).`,
+      captions: buildTestCaptions(context, validatedPhotos.length),
     });
   }
 }

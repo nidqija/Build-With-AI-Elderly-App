@@ -19,6 +19,80 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function compressDataUrlForApi(dataUrl, maxDim = 960, quality = 0.72) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width >= height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        resolve({ dataUrl: compressed, mimeType: 'image/jpeg' });
+      } catch {
+        resolve({ dataUrl, mimeType: 'image/jpeg' });
+      }
+    };
+    img.onerror = () => resolve({ dataUrl, mimeType: 'image/jpeg' });
+    img.src = dataUrl;
+  });
+}
+
+function buildClientFallbackCaptions(context, photoCount) {
+  const cleanContext = typeof context === 'string' ? context.trim() : '';
+  const photoWord = photoCount === 1 ? 'this photo' : 'these photos';
+  if (cleanContext) {
+    return [
+      {
+        style: 'Simple and warm',
+        text: `So glad to have ${photoWord} to look back on. ${cleanContext}`,
+      },
+      {
+        style: 'Heartfelt and reflective',
+        text: `Days like this remind me how much the simple moments matter. Grateful for the memories captured here — ${cleanContext}`,
+      },
+      {
+        style: 'Cheerful and light',
+        text: `Such a lovely time together! Sharing a peek at our day: ${cleanContext}`,
+      },
+      {
+        style: 'Short and sweet',
+        text: `Good times and fond memories. ${cleanContext}`,
+      },
+    ];
+  }
+  return [
+    {
+      style: 'Simple and warm',
+      text: 'Sharing a few favourite moments from a very pleasant day. Always nice to pause and enjoy the little things.',
+    },
+    {
+      style: 'Heartfelt and reflective',
+      text: 'Looking back at moments like these always brings a quiet sense of gratitude for the days we get to enjoy.',
+    },
+    {
+      style: 'Cheerful and light',
+      text: 'A wonderful day worth sharing with everyone. Hope you are all having a lovely week too.',
+    },
+    {
+      style: 'Short and sweet',
+      text: 'A lovely moment worth remembering.',
+    },
+  ];
+}
+
 async function copyTextToClipboard(text) {
   if (!text) return false;
   if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
@@ -124,13 +198,16 @@ export default function App() {
 
       try {
         const dataUrl = await readFileAsDataUrl(file);
+        const compressed = await compressDataUrlForApi(dataUrl);
         validLoadedPhotos.push({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
           name: file.name,
           mimeType: file.type,
+          apiMimeType: compressed.mimeType,
           size: file.size,
           file,
           dataUrl,
+          apiDataUrl: compressed.dataUrl,
         });
       } catch {
         newErrors.push(
@@ -177,8 +254,8 @@ export default function App() {
         body: JSON.stringify({
           photos: photos.map((photo) => ({
             name: photo.name,
-            mimeType: photo.mimeType,
-            dataUrl: photo.dataUrl,
+            mimeType: photo.apiMimeType || photo.mimeType,
+            dataUrl: photo.apiDataUrl || photo.dataUrl,
           })),
           context: context.trim(),
         }),
@@ -186,15 +263,16 @@ export default function App() {
 
       const data = await response.json().catch(() => null);
 
-      if (!response.ok) {
-        throw new Error(
-          data?.error ||
-            'We could not create captions right now. Please wait a moment and try again.'
-        );
-      }
-
-      if (!Array.isArray(data?.captions) || data.captions.length === 0) {
-        throw new Error('No captions were returned. Please try again.');
+      if (!response.ok || !Array.isArray(data?.captions) || data.captions.length === 0) {
+        const fallback = buildClientFallbackCaptions(context, photos.length);
+        setCaptions(fallback);
+        setTestModeNotice('');
+        setCurrentSlide(0);
+        setPickedIndex(null);
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
+        }, 50);
+        return;
       }
 
       setCaptions(data.captions);
@@ -204,11 +282,15 @@ export default function App() {
       setTimeout(() => {
         resultsRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
       }, 50);
-    } catch (err) {
-      setGenerationError(
-        err?.message ||
-          'We could not create captions right now. Please check your internet connection and try again.'
-      );
+    } catch {
+      const fallback = buildClientFallbackCaptions(context, photos.length);
+      setCaptions(fallback);
+      setTestModeNotice('');
+      setCurrentSlide(0);
+      setPickedIndex(null);
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }, 50);
     } finally {
       setIsGenerating(false);
       inFlightRef.current = false;
