@@ -129,6 +129,7 @@ export default function App() {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [pickedIndex, setPickedIndex] = useState(null);
   const [copiedIndex, setCopiedIndex] = useState(null);
+  const [shareNotice, setShareNotice] = useState('');
 
   const fileInputRef = useRef(null);
   const inFlightRef = useRef(false);
@@ -221,6 +222,7 @@ export default function App() {
     setCopiedIndex(null);
     setPickedIndex(null);
     setCurrentSlide(0);
+    setShareNotice('');
 
     try {
       const response = await fetch('/api/captions', {
@@ -300,46 +302,38 @@ export default function App() {
     }
   };
 
-  const handleExportToSocial = async (platform) => {
+  const handleShareToOtherPlatforms = async () => {
     if (!pickedCaption) return;
     const captionToShare = pickedCaption.text;
     copyTextSynchronously(captionToShare);
     setCopiedIndex(pickedIndex);
 
-    if (platform === 'LinkedIn') {
-      window.open(
-        `https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(captionToShare)}`,
-        '_blank',
-        'noopener,noreferrer'
-      );
-      return;
-    }
-
     const rawFiles = photos.map((p) => p.file).filter(Boolean);
-    const canNativeShareFiles =
-      typeof navigator !== 'undefined' &&
-      typeof navigator.share === 'function' &&
-      typeof navigator.canShare === 'function' &&
-      rawFiles.length > 0 &&
-      navigator.canShare({ files: rawFiles });
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      const canShareFiles =
+        typeof navigator.canShare === 'function' &&
+        rawFiles.length > 0 &&
+        navigator.canShare({ files: rawFiles });
 
-    if (canNativeShareFiles) {
       try {
-        await navigator.share({
-          files: rawFiles,
-          text: captionToShare,
-        });
+        if (canShareFiles) {
+          await navigator.share({
+            files: rawFiles,
+            text: captionToShare,
+          });
+        } else {
+          await navigator.share({
+            text: captionToShare,
+          });
+        }
+        setShareNotice('Caption copied and share menu opened.');
         return;
       } catch (err) {
         if (err?.name === 'AbortError') return;
       }
     }
 
-    const url =
-      platform === 'Instagram'
-        ? 'https://www.instagram.com/'
-        : 'https://www.facebook.com/';
-    window.open(url, '_blank', 'noopener,noreferrer');
+    setShareNotice('Caption copied — paste it into any app you like.');
   };
 
   return (
@@ -562,28 +556,18 @@ export default function App() {
               <button
                 type="button"
                 className="action-btn action-btn-primary"
-                onClick={() => handleExportToSocial('LinkedIn')}
+                onClick={handleShareToOtherPlatforms}
                 disabled={!canExportSocial}
               >
-                Share to LinkedIn
-              </button>
-              <button
-                type="button"
-                className="action-btn action-btn-primary"
-                onClick={() => handleExportToSocial('Facebook')}
-                disabled={!canExportSocial}
-              >
-                Share to Facebook
-              </button>
-              <button
-                type="button"
-                className="action-btn action-btn-primary"
-                onClick={() => handleExportToSocial('Instagram')}
-                disabled={!canExportSocial}
-              >
-                Share to Instagram
+                Share to other platforms
               </button>
             </div>
+
+            {shareNotice && (
+              <div className="copy-confirm-banner" role="status">
+                {shareNotice}
+              </div>
+            )}
           </section>
         </main>
       </div>
