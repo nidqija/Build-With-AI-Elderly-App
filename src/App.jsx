@@ -93,53 +93,52 @@ function buildClientFallbackCaptions(context, photoCount) {
   ];
 }
 
-async function copyTextToClipboard(text) {
+function copyTextSynchronously(text) {
   if (!text) return false;
-  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // Fall back to textarea selection copy below
-    }
-  }
-
-  const textArea = document.createElement('textarea');
-  textArea.value = text;
-  textArea.setAttribute('readonly', '');
-  textArea.style.position = 'fixed';
-  textArea.style.top = '-9999px';
-  document.body.appendChild(textArea);
-  textArea.select();
   let copied = false;
   try {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.setAttribute('readonly', '');
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
     copied = document.execCommand('copy');
+    document.body.removeChild(textArea);
   } catch {
     copied = false;
   }
-  document.body.removeChild(textArea);
+
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    navigator.clipboard.writeText(text).catch(() => {});
+    return true;
+  }
   return copied;
 }
 
 export default function App() {
   const [photos, setPhotos] = useState([]);
   const [context, setContext] = useState('');
+  const [instagramHandle, setInstagramHandle] = useState('');
   const [uploadErrors, setUploadErrors] = useState([]);
   const [generationError, setGenerationError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [captions, setCaptions] = useState([]);
   const [testModeNotice, setTestModeNotice] = useState('');
 
-  // Carousel state: currentIndex is which slide the user is viewing (0..3)
+  // Carousel state: currentSlide is which slide the user is viewing (0..3)
   // pickedIndex is which caption the user explicitly chose (null until they pick one)
   const [currentSlide, setCurrentSlide] = useState(0);
   const [pickedIndex, setPickedIndex] = useState(null);
   const [copiedIndex, setCopiedIndex] = useState(null);
-  const [exportNotice, setExportNotice] = useState('');
+  const [exportedPost, setExportedPost] = useState(null);
 
   const fileInputRef = useRef(null);
-  const inFlightRef = useRef(false);
+  const inFlightRef = useRef(null);
   const resultsRef = useRef(null);
+  const exportPreviewRef = useRef(null);
   const touchStartXRef = useRef(null);
 
   const hasGeneratedCaptions = captions.length > 0;
@@ -147,6 +146,8 @@ export default function App() {
   const pickedCaption =
     hasGeneratedCaptions && pickedIndex !== null ? captions[pickedIndex] : null;
   const canExportSocial = Boolean(pickedCaption && !isGenerating);
+
+  const cleanHandle = instagramHandle.trim().replace(/^@+/, '');
 
   const handleChoosePhotosClick = () => {
     if (isGenerating) return;
@@ -243,7 +244,7 @@ export default function App() {
     setCopiedIndex(null);
     setPickedIndex(null);
     setCurrentSlide(0);
-    setExportNotice('');
+    setExportedPost(null);
 
     try {
       const response = await fetch('/api/captions', {
@@ -325,20 +326,19 @@ export default function App() {
     touchStartXRef.current = null;
   };
 
-  const handlePickCaption = async (index) => {
+  const handlePickCaption = (index) => {
     if (!hasGeneratedCaptions) return;
     setPickedIndex(index);
-    setExportNotice('');
+    setExportedPost(null);
   };
 
-  const handleCopyCaption = async (index) => {
+  const handleCopyCaption = (index) => {
     const target = captions[index];
     if (!target?.text) return;
-    const ok = await copyTextToClipboard(target.text);
+    const ok = copyTextSynchronously(target.text);
     if (ok) {
       setPickedIndex(index);
       setCopiedIndex(index);
-      setExportNotice('');
     } else {
       setGenerationError(
         'We could not copy the caption automatically. You can press and hold the caption text to copy it.'
@@ -350,9 +350,34 @@ export default function App() {
     if (!pickedCaption) return;
 
     const captionToShare = pickedCaption.text;
-    await copyTextToClipboard(captionToShare);
+    // Copy synchronously BEFORE any window.open or async call so clipboard never fails
+    copyTextSynchronously(captionToShare);
     setCopiedIndex(pickedIndex);
 
+    const handleLabel = cleanHandle ? `@${cleanHandle}` : 'your account';
+
+    setExportedPost({
+      platform,
+      handle: cleanHandle ? `@${cleanHandle}` : '',
+      style: pickedCaption.style,
+      captionText: captionToShare,
+      photos,
+    });
+
+    setTimeout(() => {
+      exportPreviewRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
+    }, 50);
+
+    // For LinkedIn, open the post composer directly with the caption pre-filled in the text parameter!
+    if (platform === 'LinkedIn') {
+      const linkedInUrl = `https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(
+        captionToShare
+      )}`;
+      window.open(linkedInUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    // If on a mobile device that supports native Web Share API, trigger the native share sheet
     const rawFiles = photos.map((p) => p.file).filter(Boolean);
     const canNativeShareFiles =
       typeof navigator !== 'undefined' &&
@@ -366,13 +391,8 @@ export default function App() {
         await navigator.share({
           files: rawFiles,
           text: captionToShare,
-          title: `Share to ${platform}`,
+          title: `Post to ${platform} (${handleLabel})`,
         });
-        setExportNotice(
-          `Caption copied. Choose ${platform} from your device share menu to post your ${
-            rawFiles.length === 1 ? 'photo' : `${rawFiles.length} photos`
-          }, then paste the copied caption.`
-        );
         return;
       } catch (err) {
         if (err?.name === 'AbortError') {
@@ -380,22 +400,27 @@ export default function App() {
         }
       }
     }
+  };
 
-    const targetUrl =
-      platform === 'Instagram'
-        ? 'https://www.instagram.com/'
-        : 'https://www.facebook.com/';
+  const handleOpenExternalPlatform = (platform) => {
+    if (!pickedCaption) return;
+    copyTextSynchronously(pickedCaption.text);
+    setCopiedIndex(pickedIndex);
 
-    window.open(targetUrl, '_blank', 'noopener,noreferrer');
-
-    const photoSummary =
-      photos.length === 1
-        ? `your photo (${photos[0].name})`
-        : `your ${photos.length} photos`;
-
-    setExportNotice(
-      `Caption copied and ${platform} opened in a new window. Select ${photoSummary} in ${platform} and paste your caption.`
-    );
+    if (platform === 'LinkedIn') {
+      const linkedInUrl = `https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(
+        pickedCaption.text
+      )}`;
+      window.open(linkedInUrl, '_blank', 'noopener,noreferrer');
+    } else if (platform === 'Instagram') {
+      const url = cleanHandle
+        ? `https://www.instagram.com/${encodeURIComponent(cleanHandle)}/`
+        : 'https://www.instagram.com/';
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } else {
+      const fbUrl = `https://www.facebook.com/`;
+      window.open(fbUrl, '_blank', 'noopener,noreferrer');
+    }
   };
 
   return (
@@ -680,15 +705,37 @@ export default function App() {
 
             {/* Export to Facebook & Instagram (In the same card, enabled once user picks 1 of the 4 captions) */}
             <div className="export-divider-box">
+              <div className="handle-field-box">
+                <label htmlFor="instagram-handle-input" className="handle-label">
+                  Your Instagram or Facebook handle (optional):
+                </label>
+                <input
+                  id="instagram-handle-input"
+                  type="text"
+                  className="handle-input"
+                  value={instagramHandle}
+                  onChange={(e) => setInstagramHandle(e.target.value)}
+                  placeholder="For example: @grandma_rose"
+                />
+              </div>
+
               <p className="export-status-label" aria-live="polite">
                 {pickedCaption
-                  ? `Picked Option ${pickedIndex + 1} (${pickedCaption.style}). You can now copy and export to Facebook or Instagram:`
+                  ? `Picked Option ${pickedIndex + 1} (${pickedCaption.style}). Press a button below to prepare your post with photos and caption:`
                   : hasGeneratedCaptions
                   ? 'Press "Pick this caption" on your favourite slide above to enable Facebook and Instagram export.'
                   : 'Create and pick one of the four captions to enable Facebook and Instagram export.'}
               </p>
 
               <div className="social-export-group">
+                <button
+                  type="button"
+                  className="action-btn action-btn-primary"
+                  onClick={() => handleExportToSocial('LinkedIn')}
+                  disabled={!canExportSocial}
+                >
+                  Export to LinkedIn (Auto-fills caption)
+                </button>
                 <button
                   type="button"
                   className="action-btn action-btn-primary"
@@ -707,14 +754,80 @@ export default function App() {
                 </button>
               </div>
 
-              {exportNotice && (
+              {/* Ready-to-Post Export Card with Photos + Handle + Caption */}
+              {exportedPost && pickedCaption && (
                 <div
-                  className="copy-confirm-banner"
-                  role="status"
-                  aria-live="polite"
+                  ref={exportPreviewRef}
+                  className="exported-post-card"
+                  role="region"
+                  aria-label={`Exported ${exportedPost.platform} post`}
                 >
-                  <p>Caption copied.</p>
-                  <p className="export-notice-detail">{exportNotice}</p>
+                  <div className="exported-post-banner">
+                    ✓ Ready for {exportedPost.platform} — Caption copied to your clipboard!
+                  </div>
+
+                  <div className="exported-post-header">
+                    <span className="exported-post-platform">
+                      {exportedPost.platform} Post Preview
+                    </span>
+                    <span className="exported-post-handle">
+                      {cleanHandle ? `@${cleanHandle}` : 'Your Account'}
+                    </span>
+                  </div>
+
+                  {photos.length > 0 && (
+                    <div className="exported-photos-grid">
+                      {photos.map((photo, idx) => (
+                        <div key={photo.id} className="exported-photo-box">
+                          <img
+                            src={photo.dataUrl}
+                            alt={`Export photo ${idx + 1}`}
+                            className="exported-photo-img"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="exported-caption-box">
+                    <p className="exported-caption-label">
+                      Caption for {cleanHandle ? `@${cleanHandle}` : exportedPost.platform} (Already Copied):
+                    </p>
+                    <p className="exported-caption-body">{pickedCaption.text}</p>
+                  </div>
+
+                  <p className="exported-instructions">
+                    {exportedPost.platform === 'LinkedIn' ? (
+                      <>
+                        <strong>How to finish posting on LinkedIn:</strong> We opened LinkedIn with your caption <strong>already typed into the post box</strong> (and copied a backup to your clipboard). Just add your {photos.length === 1 ? 'photo' : 'photos'} in LinkedIn and press <strong>Post</strong>!
+                      </>
+                    ) : (
+                      <>
+                        <strong>How to finish posting:</strong> For privacy, {exportedPost.platform} does not allow outside websites to type automatically into your account. We have copied your caption above — open {exportedPost.platform}, choose your {photos.length === 1 ? 'photo' : 'photos'}, and press <strong>Paste</strong> in the caption box.
+                      </>
+                    )}
+                  </p>
+
+                  <div className="social-export-group">
+                    <button
+                      type="button"
+                      className="action-btn action-btn-secondary"
+                      onClick={() => copyTextSynchronously(pickedCaption.text)}
+                    >
+                      Copy caption again
+                    </button>
+                    <button
+                      type="button"
+                      className="action-btn action-btn-primary"
+                      onClick={() => handleOpenExternalPlatform(exportedPost.platform)}
+                    >
+                      Open {exportedPost.platform}{' '}
+                      {cleanHandle && exportedPost.platform === 'Instagram'
+                        ? `(@${cleanHandle})`
+                        : ''}{' '}
+                      to Paste &amp; Post
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

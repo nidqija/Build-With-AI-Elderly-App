@@ -415,12 +415,125 @@
   border-top: 3px solid #111111;
 }
 
+.handle-field-box {
+  margin-bottom: 16px;
+}
+
+.handle-label {
+  display: block;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #111111;
+  margin-bottom: 6px;
+}
+
+.handle-input {
+  display: block;
+  width: 100%;
+  min-height: 50px;
+  padding: 10px 14px;
+  border: 2px solid #111111;
+  background-color: #ffffff;
+  color: #111111;
+  font-size: 1.1rem;
+}
+
 .export-status-label {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   font-size: 1.05rem;
   font-weight: 700;
   color: #111111;
   margin-bottom: 12px;
+}
+
+.exported-post-card {
+  margin-top: 20px;
+  border: 3px solid #1b365d;
+  background-color: #ffffff;
+  padding: 18px;
+}
+
+.exported-post-banner {
+  background-color: #1b365d;
+  color: #ffffff;
+  padding: 12px 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 1.05rem;
+  font-weight: 800;
+  margin-bottom: 14px;
+}
+
+.exported-post-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid #111111;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+.exported-post-platform {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #111111;
+}
+
+.exported-post-handle {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #1b365d;
+}
+
+.exported-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.exported-photo-box {
+  border: 2px solid #111111;
+  background-color: #eae6dc;
+}
+
+.exported-photo-img {
+  display: block;
+  width: 100%;
+  height: 150px;
+  object-fit: cover;
+}
+
+.exported-caption-box {
+  border: 2px solid #111111;
+  background-color: #f7f5f0;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.exported-caption-label {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #1b365d;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.exported-caption-body {
+  font-size: 1.2rem;
+  line-height: 1.55;
+  color: #111111;
+  white-space: pre-wrap;
+}
+
+.exported-instructions {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #111111;
+  margin-bottom: 14px;
 }
 
 .caption-text {

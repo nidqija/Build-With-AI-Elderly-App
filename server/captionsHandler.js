@@ -285,8 +285,13 @@ async function generateWithGemini({ apiKey, model, photos, context }) {
 }
 
 async function generateWithOpenAI({ apiKey, baseUrl, model, photos, context }) {
-  const targetModel = model || 'ilmu-glm-5.3';
-  const cleanBaseUrl = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const isOfficialOpenAiKey = apiKey.startsWith('sk-proj-') || apiKey.startsWith('sk-svcacct-');
+  const targetModel = model || (isOfficialOpenAiKey ? 'gpt-4o-mini' : 'gpt-4o-mini');
+  const resolvedBaseUrl =
+    isOfficialOpenAiKey && (!baseUrl || baseUrl.includes('ilmu.ai'))
+      ? 'https://api.openai.com/v1'
+      : baseUrl || 'https://api.openai.com/v1';
+  const cleanBaseUrl = resolvedBaseUrl.replace(/\/+$/, '');
   const endpoint = `${cleanBaseUrl}/chat/completions`;
 
   const multimodalContent = [
@@ -298,6 +303,7 @@ async function generateWithOpenAI({ apiKey, baseUrl, model, photos, context }) {
       type: 'image_url',
       image_url: {
         url: `data:${photo.mimeType};base64,${photo.base64Data}`,
+        detail: 'auto',
       },
     })),
   ];
